@@ -76,23 +76,14 @@ ${ACCOUNT_DIRECTIVE}
 
 set -euo pipefail
 
-ENTRYPOINT_FILE=\$(mktemp)
+curl -fsSL ${SCRIPT_URL} -o \${SLURM_TMPDIR}/entrypoint.sh
+chmod +x \${SLURM_TMPDIR}/entrypoint.sh
 
-curl -fsSL ${SCRIPT_URL} -o \$ENTRYPOINT_FILE
-
-# Open entrypoint on FD 3 and unlink it
-exec 3<"\$ENTRYPOINT_FILE"
-rm "\$ENTRYPOINT_FILE"
-
-# Run entrypoint via FD
 singularity exec ${GPU_SINGULARITY} ${FAKEROOT_FLAG} \\
   --containall --no-home --cleanenv \\
   --env AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID},AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY},AWS_DEFAULT_REGION=us-east-1 \\
   --overlay ${OVERLAY_PATH}:rw \\
-  --bind ${FULL_BINDS} \\
+  --bind ${FULL_BINDS},\${SLURM_TMPDIR}:/slurm_tmp \\
   ${SIF_PATH} \\
-  bash <&3
-
-# Close FD
-exec 3<&-
+  bash /slurm_tmp/entrypoint.sh
 EOF
