@@ -45,6 +45,9 @@ TARGET="${HPC_SSH_TARGET:-$LOGIN_HOST}"
 # "localhost", which is why known_hosts is discarded rather than pinned --
 # the same fix as the ~/.ssh/config entry on the login node.
 SSH_OPTS=(-o BatchMode=yes)
+# HPC_SSH_DEBUG=1 makes ssh explain auth failures instead of just saying
+# "Permission denied".
+[ "${HPC_SSH_DEBUG:-0}" = "1" ] && SSH_OPTS+=(-v)
 if [ "$TARGET" = "localhost" ]; then
     SSH_OPTS+=(
         -i "/home/${CLUSTER_USER}/.ssh/id_rsa"
