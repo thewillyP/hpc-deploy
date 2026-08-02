@@ -70,6 +70,7 @@ TS_AUTHKEY="$(curl -fsS -X POST \
     printf 'JENKINS_IMAGE=%s\n'         "$JENKINS_IMAGE"
     printf 'JENKINS_DATA_DIR=%s\n'      "$JENKINS_DATA_DIR"
     printf 'JENKINS_PORT=%s\n'          "$JENKINS_PORT"
+    printf 'JENKINS_SSH_PORT=%s\n'      "$JENKINS_SSH_PORT"
     printf 'SB_ACCOUNT=%s\n'            "$ACCOUNT"
     printf 'SB_TIME=%s\n'               "$CONTROLLER_TIME"
     printf 'SB_MEM=%s\n'                "$CONTROLLER_MEM"

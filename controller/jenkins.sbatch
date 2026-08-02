@@ -11,6 +11,7 @@ set -euo pipefail
 : "${JENKINS_IMAGE:?missing}"
 : "${JENKINS_DATA_DIR:?missing}"
 : "${JENKINS_PORT:?missing}"
+: "${JENKINS_SSH_PORT:?missing}"
 : "${AWS_ACCESS_KEY_ID:?missing}"
 : "${AWS_SECRET_ACCESS_KEY:?missing}"
 : "${TS_API_CLIENT_ID:?missing}"
@@ -55,6 +56,26 @@ singularity exec "$TS_IMG" tailscale --socket="$TS_SOCK" up \
 # JENKINS_PORT is deliberately not 8080 -- that is the most contended port on
 # a shared node, and a collision means Jenkins fails to bind. tailscaled's
 # userspace forwarding is same-port, so this is also the tailnet-facing port.
+SSHD_KEY="${JENKINS_DATA_DIR}/hostkeys/ssh_host_rsa_key"
+mkdir -p "${JENKINS_DATA_DIR}/hostkeys"
+[ -f "$SSHD_KEY" ] || ssh-keygen -q -N "" -t rsa -b 4096 -f "$SSHD_KEY"
+
+singularity exec --containall --cleanenv --no-home \
+    --bind "$JENKINS_DATA_DIR":/var/jenkins_home \
+    --bind "${SLURM_TMPDIR}":/tmp \
+    --bind "/home/${USER}" \
+    "$JENKINS_IMAGE" \
+    bash -c '
+        sed -i "s/^sshd:x:[0-9]*:[0-9]*:/sshd:x:0:0:/" /etc/passwd 2>/dev/null || true
+        exec /usr/sbin/sshd -D -p '"${JENKINS_SSH_PORT}"' \
+            -o PermitTTY=yes \
+            -o AllowTcpForwarding=yes \
+            -o UsePAM=no \
+            -o StrictModes=no \
+            -o AuthorizedKeysFile=/home/'"${USER}"'/.ssh/authorized_keys \
+            -h '"$SSHD_KEY"'
+    ' &
+
 singularity run --containall --cleanenv --no-home \
     --env JENKINS_OPTS="--httpPort=${JENKINS_PORT} --httpListenAddress=127.0.0.1" \
     --env JENKINS_URL="http://jenkins:${JENKINS_PORT}/" \

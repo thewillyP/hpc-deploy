@@ -3,7 +3,7 @@ FROM jenkins/jenkins:lts-jdk21@sha256:f4f65e6cd1405cd889b7f5ac33f9d5cdc2a099de6b
 USER root
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
-      ca-certificates curl gnupg unzip openssh-client jq \
+      ca-certificates curl gnupg unzip openssh-client openssh-server jq \
  && rm -rf /var/lib/apt/lists/*
 
 # awscli, signature-verified
