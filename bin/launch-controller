@@ -18,6 +18,9 @@ source "${REPO_ROOT}/clusters/${CLUSTER}.conf"
 : "${BW_SESSION:?run: export BW_SESSION=\$(bw unlock --raw)}"
 
 # ---- secret zero: Bitwarden ------------------------------------------------
+# sync first: items created in the GUI are not visible to the CLI until then
+bw sync >/dev/null
+
 AWS_ACCESS_KEY_ID="$(bw get username aws-creds)"
 AWS_SECRET_ACCESS_KEY="$(bw get password aws-creds)"
 TS_API_CLIENT_ID="$(bw get username tailscale-oauth)"
