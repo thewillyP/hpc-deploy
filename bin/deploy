@@ -37,12 +37,20 @@ source "${HPC_ROOT}/clusters/${CLUSTER}.conf"
 # shellcheck disable=SC1090
 source "${HPC_ROOT}/clusters/defaults.conf"
 
-[ "$TARGET" = "self" ] && TARGET="$(hostname)"
+if [ "${HPC_SSH_TARGET:-}" = "self" ]; then
+    TARGET="$(hostname)"
+elif [ -n "${HPC_SSH_TARGET:-}" ]; then
+    TARGET="${HPC_SSH_TARGET}"
+else
+    TARGET="${LOGIN_HOST}"
+fi
 
 SSH_OPTS=(-o BatchMode=yes)
 # HPC_SSH_DEBUG=1 makes ssh explain auth failures instead of just saying
 # "Permission denied".
-[ "${HPC_SSH_DEBUG:-0}" = "1" ] && SSH_OPTS+=(-v)
+if [ "${HPC_SSH_DEBUG:-0}" = "1" ]; then
+    SSH_OPTS+=(-v)
+fi
 
 if [ "${HPC_SSH_TARGET:-}" = "self" ]; then
     SSH_OPTS+=(
