@@ -51,6 +51,11 @@ jobs:
           github {
             repoOwner('thewillyP')
             credentialsId('github-token')
+            traits {
+              gitHubBranchDiscovery {
+                strategyId(1)
+              }
+            }
           }
         }
         projectFactories {
