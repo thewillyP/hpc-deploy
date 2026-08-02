@@ -1,0 +1,164 @@
+#!/usr/bin/env bash
+# Submit build/run jobs. Invoked by vars/hpcDeploy.groovy from the workspace
+# root, with project config already in the environment as HPC_* variables and
+# the job bodies in .hpc-runjob / .hpc-buildjob.
+#
+#   deploy build  --cluster torch --variant gpu
+#   deploy run    --cluster torch --variant gpu [--after <jobid>]
+#   deploy up     --cluster torch --variant gpu [--rebuild]
+#   deploy cancel --cluster torch --variant gpu
+#
+# Secrets come from the environment, never from arguments:
+#   TS_AUTHKEY  AWS_ACCESS_KEY_ID  AWS_SECRET_ACCESS_KEY
+
+set -euo pipefail
+
+HPC_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+ACTION="${1:?usage: deploy <build|run|up|cancel> --cluster <name> --variant <name>}"
+shift
+
+CLUSTER="" ; VARIANT="" ; AFTER="" ; REBUILD=0
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --cluster) CLUSTER="$2"; shift 2 ;;
+        --variant) VARIANT="$2"; shift 2 ;;
+        --after)   AFTER="$2";   shift 2 ;;
+        --rebuild) REBUILD=1;    shift ;;
+        *) echo "unknown option: $1" >&2; exit 2 ;;
+    esac
+done
+: "${CLUSTER:?--cluster is required}"
+: "${VARIANT:?--variant is required}"
+: "${HPC_IMAGE:?HPC_IMAGE not in environment -- run me via hpcDeploy}"
+
+# shellcheck disable=SC1090
+source "${HPC_ROOT}/clusters/${CLUSTER}.conf"
+
+TARGET="${HPC_SSH_TARGET:-$LOGIN_HOST}"
+
+# The Jenkins container runs --containall --no-home, so ssh has no $HOME to
+# find a key or known_hosts in. And torch's global ssh_config sets a
+# KnownHostsCommand that returns the cluster's host key for a compute node,
+# which does not match what a loopback connection presents.
+SSH_OPTS=(-o BatchMode=yes)
+if [ "$TARGET" = "localhost" ]; then
+    SSH_OPTS+=(
+        -i "/home/${CLUSTER_USER}/.ssh/id_rsa"
+        -o "UserKnownHostsFile=/dev/null"
+        -o "StrictHostKeyChecking=no"
+        -o "KnownHostsCommand=none"
+        -l "${CLUSTER_USER}"
+    )
+fi
+JOB_TAG="${HPC_IMAGE}-${VARIANT}"
+SIF="${SIF_DIR}/${JOB_TAG}.sif"
+OVERLAY="${SCRATCH}/${JOB_TAG}.ext3"
+
+# ---------------------------------------------------------------------------
+# submit <entry-function> <body-file>
+#
+# Stream: NAME=VALUE lines, a --BATCH-- sentinel, then the assembled script.
+# Nothing is interpolated into the remote command and nothing lands in argv:
+# argv on a shared node is readable via `ps`, and ssh joins its arguments into
+# one string the remote shell re-parses, so an interpolated secret containing
+# a space, $, backtick or quote would break or inject. `read -r` takes each
+# line as literal data; `export "$kv"` is one quoted word, so no re-parse.
+# ---------------------------------------------------------------------------
+submit() {
+    local entry="$1" body="$2"
+    {
+        printf 'TS_AUTHKEY=%s\n'            "${TS_AUTHKEY:-}"
+        printf 'AWS_ACCESS_KEY_ID=%s\n'     "${AWS_ACCESS_KEY_ID:-}"
+        printf 'AWS_SECRET_ACCESS_KEY=%s\n' "${AWS_SECRET_ACCESS_KEY:-}"
+        printf 'AWS_DEFAULT_REGION=%s\n'    "${AWS_DEFAULT_REGION:-us-east-1}"
+        printf 'IMAGE=%s\n'                 "$HPC_IMAGE"
+        printf 'VARIANT=%s\n'               "$VARIANT"
+        printf 'JOB_TAG=%s\n'               "$JOB_TAG"
+        printf 'SIF=%s\n'                   "$SIF"
+        printf 'OVERLAY=%s\n'               "$OVERLAY"
+        printf 'OVERLAY_SRC=%s\n'           "$OVERLAY_SRC"
+        printf 'SCRATCH=%s\n'               "$SCRATCH"
+        printf 'SIF_DIR=%s\n'               "$SIF_DIR"
+        printf 'DOCKER_URL=%s\n'            "$HPC_DOCKER_URL"
+        printf 'USE_GPU=%s\n'               "$HPC_USE_GPU"
+        printf 'FAKEROOT=%s\n'              "${HPC_FAKEROOT:-0}"
+        printf 'BINDS=%s\n'                 "${HPC_BINDS:-}"
+        printf 'PASS_ENV=%s\n'              "${HPC_PASS_ENV:-}"
+        printf 'TS_HOSTNAME=%s\n'           "${HPC_TS_HOSTNAME:-$JOB_TAG}"
+        printf 'TS_TAG=%s\n'                "${HPC_TS_TAG:-tag:devenv}"
+        printf '%s\n' '--BATCH--'
+
+        # The job script is assembled here and streamed straight into sbatch:
+        # nothing is written to the cluster filesystem, nothing is curled, no
+        # commit SHA is pinned.
+        printf '#!/bin/bash\nset -euo pipefail\n'
+        cat "${HPC_ROOT}/lib/common.sh"
+        if [ -s "$body" ]; then
+            printf '%s() {\n' "$entry"
+            cat "$body"
+            printf '\n}\n'
+        fi
+        printf '%s\n' "$entry"
+    } | ssh "${SSH_OPTS[@]}" "$TARGET" "
+        while IFS= read -r kv; do
+            [ \"\$kv\" = '--BATCH--' ] && break
+            export \"\$kv\"
+        done
+        exec sbatch --parsable --export=ALL ${SBATCH_ARGS}
+    "
+}
+
+sb_args() {  # sb_args <time> <mem> <cpus> [extra...]
+    SBATCH_ARGS=""
+    [ -n "${ACCOUNT}" ] && SBATCH_ARGS+=" --account=${ACCOUNT}"
+    SBATCH_ARGS+=" --job-name=${JOB_TAG}"
+    SBATCH_ARGS+=" --nodes=1 --ntasks=1"
+    SBATCH_ARGS+=" --time=$1 --mem=$2 --cpus-per-task=$3"
+    SBATCH_ARGS+=" --output=${LOG_DIR}/%x-%j.log"
+    shift 3
+    SBATCH_ARGS+=" $*"
+}
+
+do_cancel() {
+    printf 'JOB_TAG=%s\n' "$JOB_TAG"                    \
+      | ssh "${SSH_OPTS[@]}" "$TARGET" '
+        IFS= read -r kv; export "$kv"
+        ids=$(squeue -u "$USER" -n "$JOB_TAG" -h -o "%i" || true)
+        if [ -n "$ids" ]; then
+            echo "cancelling $JOB_TAG: $ids" >&2
+            for id in $ids; do scancel "$id"; done
+        else
+            echo "no jobs named $JOB_TAG" >&2
+        fi
+    '
+}
+
+do_build() {
+    sb_args "$HPC_BUILD_TIME" "$HPC_BUILD_MEM" "$HPC_BUILD_CPUS"
+    submit build_job .hpc-buildjob
+}
+
+do_run() {
+    local extra=""
+    [ -n "$AFTER" ]                  && extra+=" --dependency=afterok:${AFTER}"
+    [ "$HPC_USE_GPU" = "1" ]         && extra+=" --gres=gpu:1"
+    [ "${HPC_EXCLUSIVE:-0}" = "1" ]  && extra+=" --exclusive"
+    sb_args "$HPC_RUN_TIME" "$HPC_RUN_MEM" "$HPC_RUN_CPUS" "$extra"
+    submit run_job .hpc-runjob
+}
+
+case "$ACTION" in
+    cancel) do_cancel ;;
+    build)  do_build ;;
+    run)    do_run ;;
+    up)
+        do_cancel
+        if [ "$REBUILD" = "1" ]; then
+            AFTER="$(do_build)"
+            echo "build job: ${AFTER}" >&2
+        fi
+        do_run
+        ;;
+    *) echo "unknown action: $ACTION" >&2; exit 2 ;;
+esac

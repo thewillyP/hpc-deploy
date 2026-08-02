@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Launch the Jenkins controller on a cluster.
+#
+# The only thing that must run from your Mac, and the only thing that needs
+# Cisco. Everything after this happens through Jenkins over the tailnet.
+#
+#   export BW_SESSION=$(bw unlock --raw)
+#   ./bin/launch-controller torch
+
+set -euo pipefail
+
+CLUSTER="${1:?usage: launch-controller <cluster>}"
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# shellcheck disable=SC1090
+source "${REPO_ROOT}/clusters/${CLUSTER}.conf"
+
+: "${BW_SESSION:?run: export BW_SESSION=\$(bw unlock --raw)}"
+
+# ---- secret zero: Bitwarden ------------------------------------------------
+AWS_ACCESS_KEY_ID="$(bw get username aws-creds)"
+AWS_SECRET_ACCESS_KEY="$(bw get password aws-creds)"
+TS_API_CLIENT_ID="$(bw get username tailscale-oauth)"
+TS_API_CLIENT_SECRET="$(bw get password tailscale-oauth)"
+JENKINS_ADMIN_USER="$(bw get username jenkins-admin)"
+JENKINS_ADMIN_PASS="$(bw get password jenkins-admin)"
+GITHUB_USER="$(bw get username github-token)"
+GITHUB_TOKEN="$(bw get password github-token)"
+
+# ---- mint a 10-minute tailscale auth key -----------------------------------
+ACCESS_TOKEN="$(curl -fsS \
+    -d "client_id=${TS_API_CLIENT_ID}" \
+    -d "client_secret=${TS_API_CLIENT_SECRET}" \
+    https://api.tailscale.com/api/v2/oauth/token \
+  | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')"
+
+TS_AUTHKEY="$(curl -fsS -X POST \
+    "https://api.tailscale.com/api/v2/tailnet/-/keys" \
+    -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+    -H "Content-Type: application/json" \
+    -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:devenv"]}}},"expirySeconds":600}' \
+  | python3 -c 'import sys,json; print(json.load(sys.stdin)["key"])')"
+
+# ---- submit ----------------------------------------------------------------
+# The stream is: NAME=VALUE lines, a sentinel, then the batch script.
+#
+# Nothing is interpolated into the remote command and nothing lands in argv.
+# argv on a shared login node is readable by other users via `ps`, and ssh
+# joins its arguments into one string the remote shell re-parses -- so an
+# interpolated secret containing a space, $, backtick or quote would break or
+# inject. `read -r` takes each line as literal data; `export "$kv"` is a single
+# quoted word, so no re-parsing happens.
+#
+# Adding a variable is one line here and nothing on the remote side.
+{
+    printf 'TS_AUTHKEY=%s\n'            "$TS_AUTHKEY"
+    printf 'AWS_ACCESS_KEY_ID=%s\n'     "$AWS_ACCESS_KEY_ID"
+    printf 'AWS_SECRET_ACCESS_KEY=%s\n' "$AWS_SECRET_ACCESS_KEY"
+    printf 'TS_API_CLIENT_ID=%s\n'      "$TS_API_CLIENT_ID"
+    printf 'TS_API_CLIENT_SECRET=%s\n'  "$TS_API_CLIENT_SECRET"
+    printf 'JENKINS_ADMIN_USER=%s\n'    "$JENKINS_ADMIN_USER"
+    printf 'JENKINS_ADMIN_PASS=%s\n'    "$JENKINS_ADMIN_PASS"
+    printf 'GITHUB_USER=%s\n'           "$GITHUB_USER"
+    printf 'GITHUB_TOKEN=%s\n'          "$GITHUB_TOKEN"
+    printf 'JENKINS_IMAGE=%s\n'         "$JENKINS_IMAGE"
+    printf 'JENKINS_DATA_DIR=%s\n'      "$JENKINS_DATA_DIR"
+    printf 'SB_ACCOUNT=%s\n'            "$ACCOUNT"
+    printf 'SB_TIME=%s\n'               "$CONTROLLER_TIME"
+    printf 'SB_MEM=%s\n'                "$CONTROLLER_MEM"
+    printf 'SB_CPUS=%s\n'               "$CONTROLLER_CPUS"
+    printf 'SB_OUTPUT=%s\n'             "${LOG_DIR}/%x-%j.log"
+    printf '%s\n' '--BATCH--'
+    cat "${REPO_ROOT}/controller/jenkins.sbatch"
+} | ssh "${LOGIN_HOST}" '
+    while IFS= read -r kv; do
+        [ "$kv" = "--BATCH--" ] && break
+        export "$kv"
+    done
+
+    sbatch --export=ALL \
+        ${SB_ACCOUNT:+--account="$SB_ACCOUNT"} \
+        --time="$SB_TIME" \
+        --mem="$SB_MEM" \
+        --cpus-per-task="$SB_CPUS" \
+        --output="$SB_OUTPUT"
+'
+
+echo "submitted -- once running: http://jenkins:8080 over the tailnet"

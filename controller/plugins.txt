@@ -1,0 +1,14 @@
+# Pin these once you have a working build:
+#   docker run --rm <image> jenkins-plugin-cli --list
+# and paste the resolved versions back here.
+configuration-as-code
+job-dsl
+workflow-aggregator
+pipeline-utility-steps
+git
+github-branch-source
+credentials-binding
+aws-credentials
+ssh-agent
+timestamper
+ws-cleanup
