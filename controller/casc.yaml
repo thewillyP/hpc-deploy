@@ -38,7 +38,7 @@ credentials:
 
 unclassified:
   location:
-    url: "http://jenkins:8080/"
+    url: "${JENKINS_URL}"
 
 jobs:
   # Discovery, not enumeration: any repo under thewillyP containing

@@ -14,6 +14,8 @@ REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # shellcheck disable=SC1090
 source "${REPO_ROOT}/clusters/${CLUSTER}.conf"
+# shellcheck disable=SC1090
+source "${REPO_ROOT}/clusters/defaults.conf"
 
 : "${BW_SESSION:?run: export BW_SESSION=\$(bw unlock --raw)}"
 
@@ -67,6 +69,7 @@ TS_AUTHKEY="$(curl -fsS -X POST \
     printf 'GITHUB_TOKEN=%s\n'          "$GITHUB_TOKEN"
     printf 'JENKINS_IMAGE=%s\n'         "$JENKINS_IMAGE"
     printf 'JENKINS_DATA_DIR=%s\n'      "$JENKINS_DATA_DIR"
+    printf 'JENKINS_PORT=%s\n'          "$JENKINS_PORT"
     printf 'SB_ACCOUNT=%s\n'            "$ACCOUNT"
     printf 'SB_TIME=%s\n'               "$CONTROLLER_TIME"
     printf 'SB_MEM=%s\n'                "$CONTROLLER_MEM"
@@ -88,4 +91,4 @@ TS_AUTHKEY="$(curl -fsS -X POST \
         --output="$SB_OUTPUT"
 '
 
-echo "submitted -- once running: http://jenkins:8080 over the tailnet"
+echo "submitted -- once running: http://jenkins:${JENKINS_PORT} over the tailnet"

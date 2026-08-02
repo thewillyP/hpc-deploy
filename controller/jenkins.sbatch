@@ -10,6 +10,7 @@ set -euo pipefail
 : "${TS_AUTHKEY:?missing}"
 : "${JENKINS_IMAGE:?missing}"
 : "${JENKINS_DATA_DIR:?missing}"
+: "${JENKINS_PORT:?missing}"
 : "${AWS_ACCESS_KEY_ID:?missing}"
 : "${AWS_SECRET_ACCESS_KEY:?missing}"
 : "${TS_API_CLIENT_ID:?missing}"
@@ -46,11 +47,17 @@ singularity exec "$TS_IMG" tailscale --socket="$TS_SOCK" up \
     --accept-risk=lose-ssh
 
 # ---- controller ------------------------------------------------------------
-# httpListenAddress=127.0.0.1 is load-bearing: a compute node sits on NYU
-# internal network, so an 0.0.0.0 bind would expose Jenkins to it. Bound to
-# loopback, tailscaled's inbound forwarding is the only way in.
+# httpListenAddress=127.0.0.1 keeps Jenkins off the NYU internal network that
+# the compute node sits on. It does NOT isolate you from other users on the
+# same node: Singularity shares the host network namespace, so their loopback
+# is your loopback. Jenkins' own auth (casc.yaml) is what protects it there.
+#
+# JENKINS_PORT is deliberately not 8080 -- that is the most contended port on
+# a shared node, and a collision means Jenkins fails to bind. tailscaled's
+# userspace forwarding is same-port, so this is also the tailnet-facing port.
 singularity run --containall --cleanenv --no-home \
-    --env JENKINS_OPTS="--httpPort=8080 --httpListenAddress=127.0.0.1" \
+    --env JENKINS_OPTS="--httpPort=${JENKINS_PORT} --httpListenAddress=127.0.0.1" \
+    --env JENKINS_URL="http://jenkins:${JENKINS_PORT}/" \
     --env AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" \
     --env AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \
     --env AWS_DEFAULT_REGION=us-east-1 \
