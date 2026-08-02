@@ -102,6 +102,9 @@ submit() {
         # commit SHA is pinned.
         printf '#!/bin/bash\nset -euo pipefail\n'
         cat "${HPC_ROOT}/lib/common.sh"
+        # Explicit newline after every cat: a file with no trailing newline
+        # would otherwise run its last line into the next block.
+        printf '\n'
         if [ -s "$body" ]; then
             printf '%s() {\n' "$entry"
             cat "$body"
