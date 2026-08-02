@@ -32,19 +32,25 @@ JENKINS_ADMIN_PASS="$(bw get password jenkins-admin)"
 GITHUB_USER="$(bw get username github-token)"
 GITHUB_TOKEN="$(bw get password github-token)"
 
-# ---- mint a 10-minute tailscale auth key -----------------------------------
+# ---- mint and sign a tailscale auth key -------------------------------------
 ACCESS_TOKEN="$(curl -fsS \
     -d "client_id=${TS_API_CLIENT_ID}" \
     -d "client_secret=${TS_API_CLIENT_SECRET}" \
     https://api.tailscale.com/api/v2/oauth/token \
   | python3 -c 'import sys,json; print(json.load(sys.stdin)["access_token"])')"
 
-TS_AUTHKEY="$(curl -fsS -X POST \
+TS_AUTHKEY_RAW="$(curl -fsS -X POST \
     "https://api.tailscale.com/api/v2/tailnet/-/keys" \
     -H "Authorization: Bearer ${ACCESS_TOKEN}" \
     -H "Content-Type: application/json" \
-    -d '{"capabilities":{"devices":{"create":{"reusable":false,"ephemeral":true,"preauthorized":true,"tags":["tag:devenv"]}}},"expirySeconds":600}' \
+    -d '{"capabilities":{"devices":{"create":{"reusable":true,"ephemeral":true,"preauthorized":true,"tags":["tag:devenv"]}}},"expirySeconds":'"${TS_KEY_EXPIRY_SECONDS}"'}' \
   | python3 -c 'import sys,json; print(json.load(sys.stdin)["key"])')"
+
+if tailscale lock status 2>/dev/null | grep -q "Tailnet Lock is ENABLED"; then
+    TS_AUTHKEY="$(tailscale lock sign "$TS_AUTHKEY_RAW")"
+else
+    TS_AUTHKEY="$TS_AUTHKEY_RAW"
+fi
 
 # ---- submit ----------------------------------------------------------------
 # The stream is: NAME=VALUE lines, a sentinel, then the batch script.
@@ -71,6 +77,7 @@ TS_AUTHKEY="$(curl -fsS -X POST \
     printf 'JENKINS_DATA_DIR=%s\n'      "$JENKINS_DATA_DIR"
     printf 'JENKINS_PORT=%s\n'          "$JENKINS_PORT"
     printf 'JENKINS_SSH_PORT=%s\n'      "$JENKINS_SSH_PORT"
+    printf 'TS_AUTHKEY_JOBS=%s\n'       "$TS_AUTHKEY"
     printf 'SB_ACCOUNT=%s\n'            "$ACCOUNT"
     printf 'SB_TIME=%s\n'               "$CONTROLLER_TIME"
     printf 'SB_MEM=%s\n'                "$CONTROLLER_MEM"

@@ -29,6 +29,11 @@ credentials:
               description: "GitHub PAT (public_repo) -- raises org-scan API limit from 60/hr to 5000/hr"
               username: "${GITHUB_USER}"
               password: "${GITHUB_TOKEN}"
+          - string:
+              scope: GLOBAL
+              id: "tailscale-authkey"
+              description: "Pre-signed tailscale auth key for deploy jobs"
+              secret: "${TS_AUTHKEY_JOBS}"
           - usernamePassword:
               scope: GLOBAL
               id: "tailscale-oauth"

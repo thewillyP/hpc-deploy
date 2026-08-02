@@ -95,32 +95,12 @@ def call(Map cfg) {
                      credentialsId: 'aws-credentials',
                      accessKeyVariable: 'AWS_ACCESS_KEY_ID',
                      secretKeyVariable: 'AWS_SECRET_ACCESS_KEY'],
-                    usernamePassword(credentialsId: 'tailscale-oauth',
-                     usernameVariable: 'TS_API_CLIENT_ID',
-                     passwordVariable: 'TS_API_CLIENT_SECRET'),
+                    string(credentialsId: 'tailscale-authkey',
+                     variable: 'TS_AUTHKEY'),
                 ]) {
-                    // Single-quoted: Groovy must not touch this. Secrets reach
-                    // bin/deploy through the environment, never through argv.
-                    // jq, not python3 -- the controller image has no python3.
                     sh '''
+                        set +x
                         set -eu
-                        TOKEN=$(curl -fsS \
-                            -d "client_id=${TS_API_CLIENT_ID}" \
-                            -d "client_secret=${TS_API_CLIENT_SECRET}" \
-                            https://api.tailscale.com/api/v2/oauth/token \
-                          | jq -re .access_token)
-
-                        TS_AUTHKEY=$(curl -fsS -X POST \
-                            https://api.tailscale.com/api/v2/tailnet/-/keys \
-                            -H "Authorization: Bearer ${TOKEN}" \
-                            -H "Content-Type: application/json" \
-                            -d "{\\"capabilities\\":{\\"devices\\":{\\"create\\":{\\"reusable\\":false,\\"ephemeral\\":true,\\"preauthorized\\":true,\\"tags\\":[\\"${HPC_TS_TAG}\\"]}}},\\"expirySeconds\\":600}" \
-                          | jq -re .key)
-                        export TS_AUTHKEY
-
-                        # REBUILD arrives as 0/1, not true/false: a boolean
-                        # param stringifies to "false", which is non-empty and
-                        # would make ${VAR:+...} always expand.
                         REBUILD_FLAG=""
                         [ "${REBUILD}" = "1" ] && REBUILD_FLAG="--rebuild"
 

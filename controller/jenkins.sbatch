@@ -8,6 +8,7 @@
 set -euo pipefail
 
 : "${TS_AUTHKEY:?missing}"
+: "${TS_AUTHKEY_JOBS:?missing}"
 : "${JENKINS_IMAGE:?missing}"
 : "${JENKINS_DATA_DIR:?missing}"
 : "${JENKINS_PORT:?missing}"
@@ -86,6 +87,7 @@ singularity run --containall --cleanenv --no-home \
     --env JENKINS_ADMIN_PASS="$JENKINS_ADMIN_PASS" \
     --env GITHUB_USER="$GITHUB_USER" \
     --env GITHUB_TOKEN="$GITHUB_TOKEN" \
+    --env TS_AUTHKEY_JOBS="$TS_AUTHKEY_JOBS" \
     --bind "$JENKINS_DATA_DIR":/var/jenkins_home \
     --bind "${SLURM_TMPDIR}":/tmp \
     --bind "/home/${USER}/.ssh" \
