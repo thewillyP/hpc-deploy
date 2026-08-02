@@ -60,21 +60,19 @@ SSHD_KEY="${JENKINS_DATA_DIR}/hostkeys/ssh_host_rsa_key"
 mkdir -p "${JENKINS_DATA_DIR}/hostkeys"
 [ -f "$SSHD_KEY" ] || ssh-keygen -q -N "" -t rsa -b 4096 -f "$SSHD_KEY"
 
-singularity exec --containall --cleanenv --no-home \
+singularity exec --fakeroot --writable-tmpfs --containall --cleanenv --no-home \
     --bind "$JENKINS_DATA_DIR":/var/jenkins_home \
-    --bind "${SLURM_TMPDIR}":/tmp \
-    --bind "/home/${USER}" \
+    --bind "/home/${USER}/.ssh":/root/.ssh \
     "$JENKINS_IMAGE" \
-    bash -c '
-        sed -i "s/^sshd:x:[0-9]*:[0-9]*:/sshd:x:0:0:/" /etc/passwd 2>/dev/null || true
-        exec /usr/sbin/sshd -D -p '"${JENKINS_SSH_PORT}"' \
-            -o PermitTTY=yes \
-            -o AllowTcpForwarding=yes \
-            -o UsePAM=no \
-            -o StrictModes=no \
-            -o AuthorizedKeysFile=/home/'"${USER}"'/.ssh/authorized_keys \
-            -h '"$SSHD_KEY"'
-    ' &
+    bash -c 'sed -i "s/^sshd:x:[0-9]*:[0-9]*:/sshd:x:0:0:/" /etc/passwd 2>/dev/null || true
+             exec /usr/sbin/sshd -D -e -p '"${JENKINS_SSH_PORT}"' \
+               -o PermitUserEnvironment=yes \
+               -o PermitTTY=yes \
+               -o X11Forwarding=yes \
+               -o AllowTcpForwarding=yes \
+               -o GatewayPorts=yes \
+               -o UsePAM=no \
+               -h '"$SSHD_KEY" &
 
 singularity run --containall --cleanenv --no-home \
     --env JENKINS_OPTS="--httpPort=${JENKINS_PORT} --httpListenAddress=127.0.0.1" \
