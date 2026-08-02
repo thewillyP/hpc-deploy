@@ -37,20 +37,15 @@ source "${HPC_ROOT}/clusters/${CLUSTER}.conf"
 # shellcheck disable=SC1090
 source "${HPC_ROOT}/clusters/defaults.conf"
 
-TARGET="${HPC_SSH_TARGET:-$LOGIN_HOST}"
+[ "$TARGET" = "self" ] && TARGET="$(hostname)"
 
-# The Jenkins container runs --containall --no-home, so $HOME is
-# /var/jenkins_home and ssh finds no key, no known_hosts, no ~/.ssh/config.
-# Every compute node presents a different host key under the name
-# "localhost", which is why known_hosts is discarded rather than pinned --
-# the same fix as the ~/.ssh/config entry on the login node.
 SSH_OPTS=(-o BatchMode=yes)
 # HPC_SSH_DEBUG=1 makes ssh explain auth failures instead of just saying
 # "Permission denied".
 [ "${HPC_SSH_DEBUG:-0}" = "1" ] && SSH_OPTS+=(-v)
-if [ "$TARGET" = "localhost" ]; then
+
+if [ "${HPC_SSH_TARGET:-}" = "self" ]; then
     SSH_OPTS+=(
-        -i "/home/${CLUSTER_USER}/.ssh/id_rsa"
         -o "UserKnownHostsFile=/dev/null"
         -o "StrictHostKeyChecking=no"
         -l "${CLUSTER_USER}"

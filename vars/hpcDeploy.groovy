@@ -79,10 +79,8 @@ def call(Map cfg) {
                 "CLUSTER=${params.CLUSTER}",
                 "VARIANT=${params.VARIANT}",
                 "REBUILD=${params.REBUILD ? 1 : 0}",
-                // Jenkins runs on a compute node of the target cluster, so
-                // slurm is reachable over loopback -- no network hop.
-                "HPC_SSH_TARGET=localhost",
-                "HPC_SSH_DEBUG=1",
+                "HPC_SSH_TARGET=self",
+                "HPC_SSH_DEBUG=0",
             ]) {
                 withCredentials([
                     [$class: 'AmazonWebServicesCredentialsBinding',
