@@ -72,6 +72,13 @@ def call(Map cfg) {
                 "HPC_TS_TAG=${cfg.tsTag ?: 'tag:devenv'}",
                 "HPC_TS_HOSTNAME=${cfg.tsHostname ?: "${cfg.image}-${params.VARIANT}"}",
                 "HPC_PASS_ENV=${cfg.passEnv ?: ''}",
+                // params are NOT in the environment on a job's first build --
+                // properties() declares them but the build itself has none.
+                // Pass them explicitly so `set -u` does not kill the script.
+                "ACTION=${params.ACTION}",
+                "CLUSTER=${params.CLUSTER}",
+                "VARIANT=${params.VARIANT}",
+                "REBUILD=${params.REBUILD ? 1 : 0}",
                 // Jenkins runs on a compute node of the target cluster, so
                 // slurm is reachable over loopback -- no network hop.
                 "HPC_SSH_TARGET=localhost",
@@ -85,28 +92,35 @@ def call(Map cfg) {
                      usernameVariable: 'TS_API_CLIENT_ID',
                      passwordVariable: 'TS_API_CLIENT_SECRET'),
                 ]) {
-                    // Single-quoted: Groovy must not touch these. Secrets reach
+                    // Single-quoted: Groovy must not touch this. Secrets reach
                     // bin/deploy through the environment, never through argv.
+                    // jq, not python3 -- the controller image has no python3.
                     sh '''
                         set -eu
                         TOKEN=$(curl -fsS \
                             -d "client_id=${TS_API_CLIENT_ID}" \
                             -d "client_secret=${TS_API_CLIENT_SECRET}" \
                             https://api.tailscale.com/api/v2/oauth/token \
-                          | python3 -c 'import sys,json;print(json.load(sys.stdin)["access_token"])')
+                          | jq -re .access_token)
 
                         TS_AUTHKEY=$(curl -fsS -X POST \
                             https://api.tailscale.com/api/v2/tailnet/-/keys \
                             -H "Authorization: Bearer ${TOKEN}" \
                             -H "Content-Type: application/json" \
                             -d "{\\"capabilities\\":{\\"devices\\":{\\"create\\":{\\"reusable\\":false,\\"ephemeral\\":true,\\"preauthorized\\":true,\\"tags\\":[\\"${HPC_TS_TAG}\\"]}}},\\"expirySeconds\\":600}" \
-                          | python3 -c 'import sys,json;print(json.load(sys.stdin)["key"])')
+                          | jq -re .key)
                         export TS_AUTHKEY
+
+                        # REBUILD arrives as 0/1, not true/false: a boolean
+                        # param stringifies to "false", which is non-empty and
+                        # would make ${VAR:+...} always expand.
+                        REBUILD_FLAG=""
+                        [ "${REBUILD}" = "1" ] && REBUILD_FLAG="--rebuild"
 
                         ./.hpc/bin/deploy "${ACTION}" \
                             --cluster "${CLUSTER}" \
                             --variant "${VARIANT}" \
-                            ${REBUILD:+--rebuild}
+                            ${REBUILD_FLAG}
                     '''
                 }
             }
